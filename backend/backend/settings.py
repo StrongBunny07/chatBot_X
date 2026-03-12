@@ -130,4 +130,4 @@ CORS_ALLOWED_ORIGINS = [
 
 # Ollama settings
 OLLAMA_BASE_URL = 'http://localhost:11434'
-OLLAMA_MODEL = 'deepseek-r1:8b'
+OLLAMA_MODEL = 'deepseek-r1:1.5b'
