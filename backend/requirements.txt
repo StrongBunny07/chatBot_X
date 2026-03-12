@@ -1,3 +1,6 @@
 django>=6.0
 django-cors-headers>=4.9
 requests>=2.31
+beautifulsoup4>=4.12
+huggingface_hub>=0.20
+python-dotenv>=1.0
