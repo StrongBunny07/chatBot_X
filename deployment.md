@@ -2,25 +2,21 @@
 
 ## Deployment Target
 
-This guide is for deploying the project on an Ubuntu Linux server with:
+This guide deploys ChatBot X on Ubuntu using:
 
-- Native Ollama installation
 - Django backend served by Gunicorn
 - React frontend built with Vite and served by Nginx
-- Nginx reverse proxy in front of both frontend and backend
-
-This is the recommended path for your current setup because Ollama is already installed directly on the machine.
-
----
+- Hugging Face Inference API (Qwen) for model responses
+- `.env` file for secrets
 
 ## Final Production Architecture
 
 ```text
 Browser
-  -> Nginx :80
+  -> Nginx :80/:443
      -> Frontend static files
      -> /api/ -> Gunicorn/Django :8000
-                    -> Ollama :11434
+                    -> Hugging Face Inference API (HTTPS)
 ```
 
 ---
@@ -31,11 +27,8 @@ Browser
 - Python 3.10+
 - Node.js 18+
 - Nginx
-- Ollama installed and running
-- At least 8 GB RAM for smaller models
-- At least 15 GB free disk space
-
-For CPU-only deployment, use `deepseek-r1:1.5b` first. Larger models need more RAM and will be slower.
+- Outbound internet access to `api-inference.huggingface.co`
+- Hugging Face API token
 
 ---
 
@@ -47,8 +40,6 @@ sudo git clone <your-repo-url> chatBot_X
 sudo chown -R $USER:$USER chatBot_X
 cd chatBot_X
 ```
-
-If the repo is already copied manually, just move into the project directory.
 
 ---
 
@@ -67,32 +58,25 @@ sudo apt install -y nodejs npm
 
 ---
 
-## 4. Install and Start Ollama
+## 4. Configure Environment Variables
 
-If Ollama is not already installed:
+Create backend env file:
 
 ```bash
-curl -fsSL https://ollama.com/install.sh | sudo sh
+cd /var/www/chatBot_X/backend
+cp .env.example .env
+nano .env
 ```
 
-Verify it is running:
+Set your token:
 
-```bash
-curl http://localhost:11434/
-```
-
-Pull the model:
-
-```bash
-ollama pull deepseek-r1:1.5b
-ollama list
+```env
+HF_API_KEY=hf_your_real_token_here
 ```
 
 ---
 
 ## 5. Install Backend Dependencies
-
-Your current project was created without a virtual environment, but for deployment you should use one. Production should not rely on global Python packages.
 
 ```bash
 cd /var/www/chatBot_X/backend
@@ -119,29 +103,21 @@ python manage.py createsuperuser
 
 ## 6. Update Django for Production
 
-Before deployment, update these values in Django settings:
+Before deployment, set:
 
 - `DEBUG = False`
-- Set `ALLOWED_HOSTS` to your server IP or domain
-- Restrict CORS to your real frontend domain
+- `ALLOWED_HOSTS` to your domain/server IP
+- `CORS_ALLOWED_ORIGINS` to your frontend domain only
 
-Example values:
+Example:
 
 ```python
 DEBUG = False
 ALLOWED_HOSTS = ['your-domain.com', 'www.your-domain.com', 'your-server-ip']
 
 CORS_ALLOWED_ORIGINS = [
-    'http://your-domain.com',
     'https://your-domain.com',
 ]
-```
-
-Your current Ollama settings can stay the same if Ollama runs on the same machine:
-
-```python
-OLLAMA_BASE_URL = 'http://localhost:11434'
-OLLAMA_MODEL = 'deepseek-r1:1.5b'
 ```
 
 ---
@@ -154,7 +130,7 @@ npm install
 npm run build
 ```
 
-This creates production files in:
+Build output:
 
 ```bash
 /var/www/chatBot_X/frontend/dist
@@ -164,32 +140,33 @@ This creates production files in:
 
 ## 8. Create Gunicorn Service
 
-Create the service file:
+Create service file:
 
 ```bash
 sudo nano /etc/systemd/system/chatbotx.service
 ```
 
-Paste this:
+Use this config:
 
 ```ini
 [Unit]
 Description=ChatBot X Django Gunicorn Service
-After=network.target ollama.service
+After=network.target
 
 [Service]
 User=nandha
 Group=www-data
 WorkingDirectory=/var/www/chatBot_X/backend
 Environment="PATH=/var/www/chatBot_X/backend/.venv/bin"
-ExecStart=/var/www/chatBot_X/backend/.venv/bin/gunicorn backend.wsgi:application --bind 127.0.0.1:8000
+EnvironmentFile=/var/www/chatBot_X/backend/.env
+ExecStart=/var/www/chatBot_X/backend/.venv/bin/gunicorn backend.wsgi:application --bind 127.0.0.1:8000 --workers 3 --timeout 120
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Reload and start:
+Enable and start:
 
 ```bash
 sudo systemctl daemon-reload
@@ -202,13 +179,13 @@ sudo systemctl status chatbotx
 
 ## 9. Configure Nginx
 
-Create an Nginx config:
+Create config:
 
 ```bash
 sudo nano /etc/nginx/sites-available/chatbotx
 ```
 
-Paste this:
+Use:
 
 ```nginx
 server {
@@ -224,26 +201,22 @@ server {
 
     location /api/ {
         proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
     }
 }
 ```
 
-Enable it:
+Enable and restart:
 
 ```bash
 sudo ln -s /etc/nginx/sites-available/chatbotx /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
-sudo systemctl restart nginx
-```
-
-If the default Nginx site conflicts, disable it:
-
-```bash
-sudo rm /etc/nginx/sites-enabled/default
 sudo systemctl restart nginx
 ```
 
@@ -265,8 +238,6 @@ sudo ufw status
 Check services:
 
 ```bash
-curl http://localhost:11434/
-sudo systemctl status ollama
 sudo systemctl status chatbotx
 sudo systemctl status nginx
 ```
@@ -276,30 +247,21 @@ Test backend directly:
 ```bash
 curl -X POST http://127.0.0.1:8000/api/chat/ \
   -H "Content-Type: application/json" \
-  -d '{"message":"hello"}'
+  -d '{"message":"hello","useWeb":true,"stream":false}'
 ```
 
-Then open:
+Open app:
 
 ```text
 http://your-server-ip
 ```
 
-Or your real domain if DNS is configured.
-
 ---
 
 ## 12. Optional HTTPS with Certbot
 
-Install Certbot:
-
 ```bash
 sudo apt install -y certbot python3-certbot-nginx
-```
-
-Generate SSL config:
-
-```bash
 sudo certbot --nginx -d your-domain.com -d www.your-domain.com
 ```
 
@@ -310,7 +272,6 @@ sudo certbot --nginx -d your-domain.com -d www.your-domain.com
 Restart services:
 
 ```bash
-sudo systemctl restart ollama
 sudo systemctl restart chatbotx
 sudo systemctl restart nginx
 ```
@@ -318,12 +279,11 @@ sudo systemctl restart nginx
 View logs:
 
 ```bash
-journalctl -u ollama -f
 journalctl -u chatbotx -f
 sudo tail -f /var/log/nginx/error.log
 ```
 
-Rebuild frontend after changes:
+Rebuild frontend:
 
 ```bash
 cd /var/www/chatBot_X/frontend
@@ -335,22 +295,20 @@ sudo systemctl restart nginx
 
 ## Current Project Constraints Before Production
 
-- Django is currently configured for development defaults and should be hardened before public deployment.
-- SQLite is acceptable for small personal use, but PostgreSQL is better for multi-user production.
-- The current backend returns full responses and does not stream tokens yet.
-- CPU-only Ollama is fine for testing and small traffic, but it will be slow under load.
-- For multiple users, use a larger server or a GPU-enabled machine.
+- Django still needs production hardening (`DEBUG=False`, secure cookie settings, strict CORS).
+- SQLite is fine for light use, but PostgreSQL is better for multi-user production.
+- Hugging Face API introduces network dependency and token usage costs.
+- Large answers may increase response time and API cost.
 
 ---
 
 ## Recommended First Deployment
 
-For your first deployment, use this exact stack:
+Use this stack for the first production rollout:
 
-- Native Ollama
-- `deepseek-r1:1.5b`
 - Django + Gunicorn
 - React static build
 - Nginx reverse proxy
+- Hugging Face Inference API via `.env` token
 
-That is the simplest stable path from your current local setup to a real server.
+This is the cleanest path for your current codebase (no Ollama dependency).
