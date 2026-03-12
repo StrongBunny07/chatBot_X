@@ -5,7 +5,7 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>ChatBot X</h1>
+        <h1>ChatBot X Pro</h1>
         <p>Powered by DeepSeek R1</p>
       </header>
       <ChatBox />
