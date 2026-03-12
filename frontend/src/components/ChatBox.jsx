@@ -79,7 +79,7 @@ function ChatBox() {
           disabled={loading}
         />
         <button type="submit" disabled={loading || !input.trim()}>
-          Send
+          Send Message
         </button>
       </form>
     </div>
